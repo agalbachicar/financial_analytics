@@ -92,7 +92,8 @@ def getEvents(close, tEvents, ptSl, trgt, minRet, numThreads, t1=False, side=Non
     if side is None:events=events.drop('side',axis=1)
     return events
 
-def getBins(events,close):
+def getBinsOld(events,close):
+    # Snippet 3.5
     #1) prices aligned with events
     events_=events.dropna(subset=['t1'])
     px=events_.index.union(events_['t1'].values).drop_duplicates()
@@ -102,10 +103,61 @@ def getBins(events,close):
     out['ret']=px.loc[events_['t1'].values].values/px.loc[events_.index]-1
     out['bin']=np.sign(out['ret'])
     # Where out index and t1 (vertical barrier) intersect label 0
-    # See page 49, it is a suggested exercise. 
+    # See page 49, it is a suggested exercise.
     try:
         locs = out.query('index in @t1').index
         out.loc[locs, 'bin'] = 0
     except:
         pass
     return out
+
+
+def getBins(events, close):
+    '''
+    Compute event's outcome (including side information, if provided).
+    
+    Snippet 3.7
+    
+    Case 1: ('side' not in events): bin in (-1,1) <-label by price action
+    Case 2: ('side' in events): bin in (0,1) <-label by pnl (meta-labeling)
+    
+    @param events It's a dataframe whose 
+      - index is event's starttime
+      - Column t1 is event's endtime
+      - Column trgt is event's target
+      - Column side (optional) implies the algo's position side.
+    @param close It's a close price series.
+    '''
+    #1) prices aligned with events
+    events_=events.dropna(subset=['t1'])
+    px=events_.index.union(events_['t1'].values).drop_duplicates()
+    px=close.reindex(px,method='bfill')
+    #2) create out object
+    out=pd.DataFrame(index=events_.index)
+    out['ret']=px.loc[events_['t1'].values].values/px.loc[events_.index]-1
+    if 'side' in events_:
+        out['ret']*=events_['side'] # meta-labeling
+    out['bin']=np.sign(out['ret'])
+    if 'side' in events_:
+        out.loc[out['ret']<=0,'bin']=0 # meta-labeling
+    return out
+
+
+def dropLabels(events, minPct=.05):
+    '''
+    Takes a dataframe of events and removes those labels that fall
+    below minPct (minimum percentil).
+    
+    Snippet 3.8
+    
+    @param events An events dataframe, such as the output of getBins()
+    @param minPct The minimum percentil of rare labels to have.
+    @return The input @p events dataframe but filtered.
+    '''
+    # apply weights, drop labels with insufficient examples
+    while True:
+        df0=events['bin'].value_counts(normalize=True)
+        if df0.min()>minPct or df0.shape[0]<3:break
+        print('dropped label: ', df0.argmin(),df0.min())
+        events=events[events['bin']!=df0.argmin()]
+    return events
