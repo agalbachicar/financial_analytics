@@ -1,6 +1,23 @@
 def getSignal(events, stepSize, prob, pred, numClasses, numThreads, **kwargs):
     '''
+    Computes a bet size out of the probability of the predictions that follows
+    a discretized sigmoid function of 1 / stepSize steps.
+
+    The discretization step in the pipeline will run in numThreads threads.
+
     See Advances in Financial Analytics, snippet 10.1, page 143.
+
+    @param events Determines whether the probability comes from a meta labeling
+        or not. When events has 'side', the return value takes the sign of the
+        side.
+    @param stepSize A number in [0, 1] that is the inverse of the number of
+        steps.
+    @param prob The probabilities of the predictions pred.
+    @param pred The predictions. It could be [-1, 1] or [-1, 0, 1] or other set.
+    @param numClasses The number of possible values in the predictions.
+    @param numThreads The number of threads that will be open to run the
+        discretization.
+    @return A series of bet sizes.
     '''
     # Get signals from predictions
     if prob.shape[0] == 0: return pd.Series()
@@ -9,7 +26,7 @@ def getSignal(events, stepSize, prob, pred, numClasses, numThreads, **kwargs):
     signal0 = (prob - 1. / numClasses) / (prob * (1. - prob))**0.5
     # signal = side * size
     signal0 = pred * (2 * norm._cdf(signal0) - 1)
-    # meta-labelling
+    # meta-labeling
     if 'side' in events: signal0 *= events.loc[signal0.index, 'side']
     #2) Compute average signal among those concurrently open
     df0 = signal0.to_frame('signal').join(events[['t1']], how='left')
@@ -19,7 +36,15 @@ def getSignal(events, stepSize, prob, pred, numClasses, numThreads, **kwargs):
 
 def avgActiveSignals(signals, numThreads):
     '''
+    Multiple bets can run in parallel (long and short bets) so it would be wise
+    to have a smooth and consistent position at each time as a consequence of
+    all the running bets.
+
     See Advances in Financial Analytics, snippet 10.2, page 144.
+
+    @param signals A data frame with the bet size at each [t0-t1] for each bet.
+    @param numThreads The number of threads in which averaging will happen.
+    @return A series with the bet sizes in signal with an average applied.
     '''
     # Compute the average signal among those active
     #1) time points where signals change (either starts or one ends)
@@ -50,12 +75,22 @@ def mpAvgActiveSignals(signals, molecule):
 
 def discreteSignal(signal0, stepSize):
     '''
+    Applies the discretization.
+
     See Advances in Financial Analytics, snippet 10.3, page 145.
+
+    @param signal0 The bet size to discretize
+    @param stepSize The steps size (or inverse of number of steps) to have.
+    @return A discretized step size.
     '''
     signal1 = (signal0 / stepSize).round() * stepSize # discretize
     signal1[signal1 > 1] = 1 # cap
     signal1[signal1 < -1] = 1 # floor
     return signal1
+
+# The following set of functions are used with custom calibration of the
+# positions with sigmoid functions that account for maximum dollar positions
+# per bet.
 
 def betSize(w,x):
     '''
