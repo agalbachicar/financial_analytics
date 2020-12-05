@@ -2,10 +2,20 @@ def getTrainTimes(t1, testTimes):
     '''
     Given testTimes, find the times of the training observations.
 
+    There are three conditions that would make a sample to be dropped. Let i be
+    the index of a train sample and j the index of a test sample. Let 0,1 be the
+    start and end of a sample, then:
+
+    - t_{j,0} <= t_{i,0} <= t_{j,1}            --> train starts between test
+    - t_{j,0} <= t_{i,1} <= t_{j,1}            --> train ends between test
+    - t_{i,0} <= t_{j,0} <= t_{j,1} <= t_{i,1} --> test is contained in train
+
     See Advances in Financial Analytics, snippet 7.1, page 106.
+
     @param t1 A pandas Series where the index tells when the observation started
             and the value when it ended.
-    @param testTimes Times of testing observations. 
+    @param testTimes Times of testing observations.
+    @return A purged t1.
     '''
     trn = t1.copy(deep=True)
     for i,j in testTimes.iteritems():
@@ -21,6 +31,15 @@ def getTrainTimes(t1, testTimes):
 
 def getEmbargoTimes(times, pctEmbargo):
     '''
+    Drops 2 * pctEmbargo percentage of samples at the beginning and end of times
+    to further prevent leakage.
+
+    See Advances in Financial Analytics, snippet 7.2, page 108.
+
+    @param times A data series of times to drop labels from.
+    @param pctEmbargo The percentage of times's size to drop.
+    @return A copy of times but with dropped items at the beginning and end
+        because of pctEmbargo.
     '''
     step = int(times.shape[0] * pctEmbargo)
     if step == 0:
@@ -34,7 +53,10 @@ class PurgedKFold(_BaseKFold):
     '''
     Extend KFold class to work with labels that span intervals
     The train is purged of observations overlapping test-label intervals
-    Test set is assumed contiguous (shuffle=False), w/o training samples in between
+    Test set is assumed contiguous (shuffle=False), w/o training samples in
+    between
+
+    See Advances in Financial Analytics, snippet 7.3, page 109.
     '''
     def __init__(self, n_splits=3, t1=None, pctEmbargo=0.):
         if not isinstance(t1,pd.Series):
@@ -61,6 +83,22 @@ class PurgedKFold(_BaseKFold):
 
 def cvScore(clf, X, y, sample_weight, scoring='neg_log_loss',
             t1=None, cv=None, cvGen=None, pctEmbargo=None):
+    '''
+    Scores a purged k fold cross validation training using either neg_log_loss
+    or accuracy_score.
+
+    See Advances in Financial Analytics, snippet 7.4, page 110.
+
+    @param clf Classification model to fit.
+    @param X Model parameters.
+    @param y Classification values for X
+    @param sample_weight Uniqueness weights of X.
+    @param t1 Triple barrier times.
+    @param cv Number of cross validation splits.
+    @param cvGen A _BaseKFold class. When None, PurgedKFold is used instead.
+    @param pctEmbargo The percentage of embargo on samples to use.
+    @return An array with the score result per cross validation split.
+    '''
     if scoring not in ['neg_log_loss','accuracy']:
         raise Exception('wrong scoring method.')
     idx = pd.IndexSlice
@@ -83,10 +121,20 @@ def cvScore(clf, X, y, sample_weight, scoring='neg_log_loss',
     return np.array(score)
 
 def crossValPlot(skf,classifier,X_,y_):
-    """Code adapted from:
-        
-    """
+    '''
+    Splits X_ and y_ with skf and fits the classifier at the same time that
+    plots the ROC result. It leads to a ROC plot with multiple curves (one per
+    CV split) and provides a mean result for the final train result.
+
+    Use this method without PurgedKFold
     
+    See https://github.com/BlackArbsCEO/Adv_Fin_ML_Exercises/blob/master/notebooks/07.%20Cross%20Validation%20in%20Finance.ipynb
+    
+    @param skf A _BaseKFold instance. 
+    @param classifier A classifier to be trained with skf.
+    @param X_ The parameters of the classifier.
+    @param y_ The outputs of the parameters.
+    '''
     X = np.asarray(X_)
     y = np.asarray(y_)
     
@@ -135,9 +183,20 @@ def crossValPlot(skf,classifier,X_,y_):
     ax.grid()
 
 def crossValPlot2(skf,classifier,X,y):
-    """Code adapted from:
-        
-    """
+    '''
+    Splits X_ and y_ with skf and fits the classifier at the same time that
+    plots the ROC result. It leads to a ROC plot with multiple curves (one per
+    CV split) and provides a mean result for the final train result.
+
+    Use this method with PurgedKFold
+    
+    See https://github.com/BlackArbsCEO/Adv_Fin_ML_Exercises/blob/master/notebooks/07.%20Cross%20Validation%20in%20Finance.ipynb
+    
+    @param skf A PurgedKFold instance. 
+    @param classifier A classifier to be trained with skf.
+    @param X_ The parameters of the classifier.
+    @param y_ The outputs of the parameters.
+    '''
     tprs = []
     aucs = []
     mean_fpr = np.linspace(0, 1, 100)
