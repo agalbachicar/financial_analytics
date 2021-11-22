@@ -241,3 +241,65 @@ def crossValPlot2(skf,classifier,X,y):
     ax.set_title('Receiver operating characteristic example')
     ax.legend(bbox_to_anchor=(1,1))
     ax.grid()
+
+def crossValidationTrain(skf, classifier, X, y, sample_weights=None):
+    '''
+    Splits X_ and y_ with skf and fits the classifier at the same time that
+    plots the ROC result. It leads to a ROC plot with multiple curves (one per
+    CV split) and provides a mean result for the final train result.
+
+    Use this method with PurgedKFold
+
+    See https://github.com/BlackArbsCEO/Adv_Fin_ML_Exercises/blob/master/notebooks/07.%20Cross%20Validation%20in%20Finance.ipynb
+
+    @param skf A PurgedKFold instance. 
+    @param classifier A classifier to be trained with skf.
+    @param X The parameters of the classifier.
+    @param y The outputs of the parameters.
+    @param sample_weights The weights to use for each sample.
+    '''
+    aucs = []
+    accuracies = []
+    oob_scores = []
+    recalls = []
+    precisions = []
+    class_reports = []
+    f1_scores = []
+    log_loss_scores = []
+    idx = pd.IndexSlice
+    for train, test in skf.split(X, y):
+        if sample_weights is not None:
+            try:
+                probas_ = (classifier.fit(X.iloc[idx[train]], y.iloc[idx[train]], sample_weights.iloc[idx[train]].w.values)
+                           .predict_proba(X.iloc[idx[test]]))
+            except ValueError:
+                continue
+        else:
+            try:
+                probas_ = (classifier.fit(X.iloc[idx[train]], y.iloc[idx[train]])
+                           .predict_proba(X.iloc[idx[test]]))
+            except ValueError:
+                continue
+        if probas_.shape[1] == 1:
+            logging.debug(
+                'Discarding model because of lack of samples to evaluate for either true or false.')
+            continue
+        y_pred_prob = probas_[:, 1]
+        y_pred = classifier.predict(X.iloc[idx[test]])
+
+        if hasattr(classifier, 'oob_score_'):
+            oob_scores.append(classifier.oob_score_)
+        class_reports.append(classification_report(y.iloc[idx[test]], y_pred))
+        accuracies.append(accuracy_score(y.iloc[idx[test]], y_pred))
+        recalls.append(recall_score(y.iloc[idx[test]], y_pred))
+        f1_scores.append(f1_score(y.iloc[idx[test]], y_pred))
+        log_loss_scores.append(-log_loss(y.iloc[idx[test]], y_pred_prob))
+        precisions.append(average_precision_score(
+            y.iloc[idx[test]], y_pred_prob))
+        # Compute ROC curve and area the curve
+        fpr, tpr, _ = roc_curve(y.iloc[idx[test]], y_pred_prob)
+        aucs.append(auc(fpr, tpr))
+    if hasattr(classifier, 'oob_score_'):
+        return aucs, accuracies, oob_scores, recalls, precisions, class_reports, f1_scores, log_loss_scores
+    else:
+        return aucs, accuracies, None, recalls, precisions, class_reports, f1_scores, log_loss_scores
